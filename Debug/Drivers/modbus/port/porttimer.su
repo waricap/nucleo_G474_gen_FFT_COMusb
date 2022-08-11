@@ -1,0 +1,2 @@
+../Drivers/modbus/port/porttimer.c:36:1:vMBPortTimersEnable	8	static
+../Drivers/modbus/port/porttimer.c:46:1:vMBPortTimersDisable	8	static

@@ -1,0 +1,16 @@
+../Drivers/CMSIS/Include/core_cm4.h:2059:26:ITM_SendChar	16	static
+../Drivers/STM32G4xx_HAL_Driver/Inc/stm32g4xx_ll_adc.h:6815:22:LL_ADC_REG_StartConversion	16	static
+../Core/Src/main.c:312:7:__critical_enter	4	static
+../Core/Src/main.c:317:7:__critical_exit	4	static
+../Core/Src/main.c:331:5:main	88	static
+../Core/Src/main.c:926:6:SystemClock_Config	88	static
+../Core/Src/main.c:1003:17:eMBRegInputCB	24	static
+../Core/Src/main.c:1131:17:eMBRegHoldingCB	32	static
+../Core/Src/main.c:1180:6:HAL_GPIO_EXTI_Callback	16	static
+../Core/Src/main.c:1190:6:HAL_TIM_PeriodElapsedCallback	16	static
+../Core/Src/main.c:1201:5:_write	32	static
+../Core/Src/main.c:1210:13:Mem_to_Mem_Complete	16	static
+../Core/Src/main.c:1222:7:HAL_ADC_ConvCpltCallback	16	static
+../Core/Src/main.c:1228:6:HAL_UART_RxCpltCallback	16	static
+../Core/Src/main.c:1240:6:HAL_UART_TxCpltCallback	16	static
+../Core/Src/main.c:1253:6:Error_Handler	16	static

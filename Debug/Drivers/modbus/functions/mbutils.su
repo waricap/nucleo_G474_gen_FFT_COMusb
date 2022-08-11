@@ -1,0 +1,3 @@
+../Drivers/modbus/functions/mbutils.c:47:1:xMBUtilSetBits	32	static
+../Drivers/modbus/functions/mbutils.c:86:1:xMBUtilGetBits	24	static
+../Drivers/modbus/functions/mbutils.c:117:1:prveMBError2Exception	24	static
