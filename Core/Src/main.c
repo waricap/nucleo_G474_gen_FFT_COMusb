@@ -1020,7 +1020,8 @@ eMBErrorCode    eMBRegInputCB( UCHAR * pucRegBuffer, USHORT usAddress, USHORT us
 			 number_data_array=index_temp;
 
 			 // график не рисуется, здесь идет значение частоты
-			 temp_float = (float32_t) freq_tim1; // в этом месте всегда будет стоять текущая частота, пересчитаная из таймера назад
+// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!   -42 ошибка от реала, формируется здесь, выявлена при проверке через SpLab , значит на прием команды -42,  на передачу инфы +42 Гц
+			 temp_float = (float32_t) (freq_tim1 +42 ); // в этом месте всегда будет стоять текущая частота, пересчитаная из таймера назад
 			 *pucRegBuffer++ = 	*(((uint8_t *) &temp_float) + 0); //
 			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 1);
 			 *pucRegBuffer++ =  *(((uint8_t *) &temp_float) + 2); //
@@ -1168,7 +1169,8 @@ eMBErrorCode    eMBRegHoldingCB( UCHAR * pucRegBuffer, USHORT usAddress,  USHORT
             }
             cmd_set.cmd_flags	= Reg_CMD_Buf[0];	//	Reg_CMD_Buf[0] - регистр флагов-команд, приходящих для исполнения
             cmd_set.proc_pwr	= Reg_CMD_Buf[1];	//	Reg_CMD_Buf[1] - регистр мощности,  2-98% заполнения
-            cmd_set.freq_start	= Reg_CMD_Buf[2];	// Reg_CMD_Buf[2] - регистр стартовой частоты, 14500-43000
+   // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!   -42 ошибка от реала, формируется здесь, выявлена при проверке через SpLab , значит на прием команды -42,  на передачу инфы +42 Гц
+            cmd_set.freq_start	= Reg_CMD_Buf[2] -42;	// Reg_CMD_Buf[2] - регистр стартовой частоты, 14500-43000
             cmd_set.step 		= Reg_CMD_Buf[3];	//	Reg_CMD_Buf[3] - регистр step(1-25гц) перемещения частоты, при сканировании диапазона, при сканировании старт будет Reg_CMD_Buf[2], максимум = (Reg_CMD_Buf[2] + step*_N-количество_)
             cmd_set.time_step	= Reg_CMD_Buf[4];	//	Reg_CMD_Buf[4] - регистр время милисекунд, между степами (10-1000мс)
             cmd_set.N_step		= Reg_CMD_Buf[5];	//	Reg_CMD_Buf[5] - регистр N-количество степов при сканировании 4-1000
