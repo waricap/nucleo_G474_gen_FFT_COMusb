@@ -567,6 +567,7 @@ int main(void)
 				{
 					step_power_procent =2;
 					flag_generate_OFF =255;
+					flag_generate_ON =0;
 				}
 	  		}// if (GPIO_PIN_SET == HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13))
 	  }// if (htim16.Instance->CNT >10000)
@@ -578,7 +579,7 @@ int main(void)
 	  					{
 	  						if (flag_generate_OFF >0)
 	  						{
-	  							HAL_TIM_GenerateEvent(&htim1, TIM_EventSource_Break);// програмно формируется сигнал BREAK для стопа выходов TIM1
+	  							while(HAL_OK != HAL_TIM_GenerateEvent(&htim1, TIM_EventSource_Break)) {;}// програмно формируется сигнал BREAK для стопа выходов TIM1
 	  							flag_generate_OFF =0;
 	  						}
 	  						if (flag_generate_ON >0)
@@ -713,8 +714,8 @@ int main(void)
 			  while(arr1_phase_Output_8_f32 > M_PI ) {arr1_phase_Output_8_f32 = arr1_phase_Output_8_f32 - M_PI; }
 			  while(arr1_phase_Output_8_f32 < (0-M_PI) ) {arr1_phase_Output_8_f32 = arr1_phase_Output_8_f32 + M_PI; }
 		  arr2_phase_Output_8_f32 = atan2f(data_adc2[17], data_adc2[16]);
-			  while(arr2_phase_Output_8_f32 > M_PI ) {arr2_phase_Output_8_f32 = temp_phase_f32 - M_PI; }
-			  while(arr2_phase_Output_8_f32 < (0-M_PI) ) {arr2_phase_Output_8_f32 = temp_phase_f32 + M_PI; }
+			  while(arr2_phase_Output_8_f32 > M_PI ) {arr2_phase_Output_8_f32 = arr2_phase_Output_8_f32 - M_PI; }
+			  while(arr2_phase_Output_8_f32 < (0-M_PI) ) {arr2_phase_Output_8_f32 = arr2_phase_Output_8_f32 + M_PI; }
 		  temp_phase_f32 = arr1_phase_Output_8_f32 - arr2_phase_Output_8_f32;
 //			  while(temp_phase_f32 > 2*M_PI ) {temp_phase_f32 = temp_phase_f32 - M_PI; }
 //			  while(temp_phase_f32 < (0-2*M_PI) ) {temp_phase_f32 = temp_phase_f32 + M_PI; }
