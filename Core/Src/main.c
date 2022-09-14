@@ -215,6 +215,11 @@ volatile	uint16_t * temp_adr16;
  uint32_t adc1_int[LENGTH_SAMPLES];
  float32_t  data_adc1[LENGTH_SAMPLES*2] ; // формируем через ноль, это будет входным файлом для БПФ
  float32_t  data_adc2[LENGTH_SAMPLES*2] ; // формируем через ноль, это будет входным файлом для БПФ
+ int 		size_data_adc1;
+ uint16_t  adc1_Tx[LENGTH_SAMPLES] ; // массив временный, будет хранится пока не пройдет вся передача на ПК
+ uint16_t  adc2_Tx[LENGTH_SAMPLES] ; // массив временный, будет хранится пока не пройдет вся передача на ПК
+ float32_t  data_adc1_Tx[LENGTH_SAMPLES] ; // массив временный, будет хранится пока не пройдет вся передача на ПК
+ float32_t  data_adc2_Tx[LENGTH_SAMPLES] ; // массив временный, будет хранится пока не пройдет вся передача на ПК
  float32_t  filter_adc1[LENGTH_SAMPLES] ; // отфильтрованое замеры ацп1, для вывода на дисплей
  float32_t  filter_adc2[LENGTH_SAMPLES] ;  // отфильтрованое замеры ацп2, для вывода на дисплей
  static float32_t arr1_Output_f32[LENGTH_SAMPLES*2];
@@ -272,6 +277,8 @@ volatile	uint16_t * temp_adr16;
  //uint16_t  data_X[LEN_FLOAT_ARRAY_SEND_UDP+1] ; // массив 1
  //uint16_t  data_Y[LEN_FLOAT_ARRAY_SEND_UDP+1] ; // массив 1
  uint16_t  index_temp;
+ uint16_t  index_data_real_zamer;
+ uint16_t 	flag_data_complit_for_Tx=0;
  uint16_t 	index_array_TX;
  uint16_t  cmd_array_SPI[LEN_CMD_ARRAY]; // это будет файл с командами на генерацию
  uint16_t  len_cmd_array_SPI = LEN_CMD_ARRAY *2;
@@ -468,7 +475,8 @@ int main(void)
    // LL_ADC_REG_StopConversion(hadc1->Instance);  - это есть стоп АЦП произвольно по желанию, по тесту в любом месте
    // LL_ADC_REG_StartConversion(hadc1.Instance);  - это есть старт АЦП произвольно по желанию, если был остановлен
 
-	for (uint16_t ic =0; ic <LENGTH_SAMPLES; ic++)//обнулим для начала
+    size_data_adc1 = sizeof(data_adc1)/sizeof(data_adc1[0]); // делаем один раз при инициализации
+	for (uint16_t ic =0; ic <size_data_adc1; ic++)//обнулим для начала
 		{
 			data_adc1[ic] =0;
 			data_adc2[ic] =0;
@@ -496,7 +504,7 @@ int main(void)
 	  uint16_t usCRC16_main;
   while (1)
   {
-	  if ((cmd_set.cmd_flags & 0x0004) >0)// если надо, по флагу, вот тут будет включаться циклическая долбежка
+	  if (((cmd_set.cmd_flags & 0x0004) >0) | ((cmd_set.cmd_flags & 0x0010) >0))// если надо, по флагу, вот тут будет включаться циклическая долбежка
 	  {
                   // TIM7 - используется для барабанной передачи данных по модбусу, выдает тики 100uS, прерывания нет, в цикле смотрим CNT
 		  	  	  // 25 mS  минимальный интервал между передачами, при котором минимум ошибок CRC
@@ -538,8 +546,7 @@ int main(void)
 		  htim16.Instance->CNT =0;
 		  // синяя кнопка для стопа, если был запущен с модбуса
 	      if (GPIO_PIN_SET == HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13)) // нажата кнопка
-	      {
-	    	  // HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
+	      { 														// HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
 	    	  count_press_blue_btn ++;
 	    	  if (count_press_blue_btn >5)
 	    	  {
@@ -548,16 +555,22 @@ int main(void)
 	    	  }
 	      }
 	      else
-	      {
-	    	  // HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
-	    	  count_press_blue_btn =0;
-	      }
+	      { count_press_blue_btn =0; } // HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+
 
 		  if ((cmd_set.cmd_flags & 0x0001) >0)// Reg_CMD_Buf[0].0 - флаг-команда Включить Генерацию
 	  		{
 	  			if (step_power_procent > cmd_set.proc_pwr /*power_procent*/) {step_power_procent --;}
 	  			if (step_power_procent < cmd_set.proc_pwr /*power_procent*/) {step_power_procent ++;}
-	  			flag_generate_ON =255;
+	  	  	  	  // flag_generate_ON  flag_generate_OFF - потому что onoff генерацию будем только в первой половине периода, чтобы deadtime - как надо
+	  	  	  	  	cnt_tim1 = htim1.Instance->CNT;   // tim1->ARR == 127  всегда без вариантов
+					if ((cnt_tim1 > 15) & (cnt_tim1 <55))
+					{
+						if (flag_generate_ON ==0)
+							{ __HAL_TIM_MOE_ENABLE(&htim1); } // програмно восстанавливается флаг MOE для подключения выходов TIM1
+						flag_generate_ON =255;
+						flag_generate_OFF =0;
+					}
 	  		}
 	  		else	// кнопка отпущена, СТОП
 	  		{
@@ -566,20 +579,58 @@ int main(void)
 				else
 				{
 					step_power_procent =2;
-					flag_generate_OFF =255;
-					flag_generate_ON =0;
-				}
+	  	  	  	  	  // flag_generate_ON  flag_generate_OFF - потому что onoff генерацию будем только в первой половине периода, чтобы deadtime - как надо
+	  	  	  	  	  	cnt_tim1 = htim1.Instance->CNT;   // tim1->ARR == 127  всегда без вариантов
+	  					if ((cnt_tim1 > 15) & (cnt_tim1 <55))
+	  					{
+							if (flag_generate_OFF ==0)
+							{
+								for(int i=0; i<100; i++)
+								{
+									if (HAL_OK == HAL_TIM_GenerateEvent(&htim1, TIM_EventSource_Break))
+									{
+										for (uint16_t ic =0; ic <size_data_adc1/2; ic++)//обнулим чтобы при следующей частоте не было лажи
+											{
+												data_adc1_Tx[ic] =0;
+												data_adc2_Tx[ic] =0;
+												adc1_Tx[ic] =0;
+												adc2_Tx[ic] =0;
+											}
+										index_data_real_zamer =0; // подготовка для замера
+										break;
+									}// if (HAL_OK == HAL_TIM_GenerateEvent(&htim1, TIM_EventSource_Break))
+								} // for(int i=0; i<100; i++)
+							} // if (flag_generate_OFF ==0)
+							flag_generate_OFF =255;
+							flag_generate_ON =0;
+	  					} //if ((cnt_tim1 > 15) & (cnt_tim1 <55))
+				} //  else    if (step_power_procent > 2)
 	  		}// if (GPIO_PIN_SET == HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13))
 	  }// if (htim16.Instance->CNT >10000)
 
 	  	  	  	  	  // ======   А ЭТО СТОП  СТОП  ====== ======   А ЭТО START  START  ======
 	  	  	  	  	  // flag_generate_ON  flag_generate_OFF - потому что onoff генерацию будем только в первой половине периода, чтобы deadtime - как надо
-	  	  	  	  	  	cnt_tim1 = htim1.Instance->CNT;   // tim1->ARR == 127  всегда без вариантов
+	/*  	  	  	  	  	cnt_tim1 = htim1.Instance->CNT;   // tim1->ARR == 127  всегда без вариантов
 	  					if ((cnt_tim1 > 15) & (cnt_tim1 <55))
 	  					{
 	  						if (flag_generate_OFF >0)
 	  						{
-	  							while(HAL_OK != HAL_TIM_GenerateEvent(&htim1, TIM_EventSource_Break)) {;}// програмно формируется сигнал BREAK для стопа выходов TIM1
+	  							for(int i=0; i<100; i++)
+	  							{
+	  								if (HAL_OK == HAL_TIM_GenerateEvent(&htim1, TIM_EventSource_Break))
+	  								{
+	  									for (uint16_t ic =0; ic <size_data_adc1/2; ic++)//обнулим чтобы при следующей частоте не было лажи
+	  										{
+	  											data_adc1_Tx[ic] =0;
+	  											data_adc2_Tx[ic] =0;
+	  											adc1_Tx[ic] =0;
+	  											adc2_Tx[ic] =0;
+	  										}
+	  									index_data_real_zamer =0; // подготовка для замера
+	  									break;
+	  								}
+	  							}
+	  							//while(HAL_OK != HAL_TIM_GenerateEvent(&htim1, TIM_EventSource_Break)) {;}// програмно формируется сигнал BREAK для стопа выходов TIM1
 	  							flag_generate_OFF =0;
 	  						}
 	  						if (flag_generate_ON >0)
@@ -588,6 +639,7 @@ int main(void)
 	  							flag_generate_ON =0;
 	  						}
 	  					}
+	  	*/
 	  					// ======   А ЭТО СТОП  СТОП  ====== ======   А ЭТО START  START  ======
 
 
@@ -607,6 +659,9 @@ int main(void)
 		  {  hhrtim1.Instance->sMasterRegs.MPER = hrtim_period_new; }
 	  freq_tim1 = 5440000000 / (hhrtim1.Instance->sMasterRegs.MPER) / 128; // это есть выходная частота, tim1->ARR == 127  всегда ==> делитель=128
 	  freq_tim1_float = (float)freq_tim1;
+
+	  if (((cmd_set.cmd_flags & 0x0010) >0) & (index_data_real_zamer >1000))
+	  	  { flag_data_complit_for_Tx = 255; }
 
 	  if (flag_end_FFT ==0) // flag_complit_ADC ==1 означает что все замеры сделаны
 	  {
@@ -633,26 +688,36 @@ int main(void)
 				// X_filter_1 += (float) ((uint16_t) (zamer_adc1_2[ic] & 0x0000FFFF));
 				//data_adc1[2*ic] = 0.001 * (float) (zamer_adc_dma[ic] & 0x0000FFFF);
 				// if (zamer_tim20[ic] >50) { X_filter_1 += 1; }
+				if(flag_data_complit_for_Tx>0) { adc1_Tx[ic] = zamer_adc_dma[ic] & 0x0000FFFF; }
 				X_filter_1 += (float) (zamer_adc_dma[ic] & 0x0000FFFF);
 				V_filter_1 -= X_filter_1 * (R_filter);
 				X_filter_1 += V_filter_1 - X_filter_1 * L_filter;
 				filter_adc1[ic] = X_filter_1;
 				data_adc1[2*ic] = 0.001 * X_filter_1;
+				if(flag_data_complit_for_Tx>0) { data_adc1_Tx[ic] = data_adc1[2*ic]; }
 				//data_adc1[2*(ic-32)] = X_filter_1;
 				//data_adc1[2*(ic-32)] = (float) ((uint16_t) (zamer_adc1_2[ic] & 0x0000FFFF));
 				//data_adc1[2*(ic-32+1)] =0;
 				// ==================================================================
 				// X_filter_2 += (float) ((uint16_t) (zamer_adc1_2[ic] >>16));
 				//data_adc2[2*ic] = 0.001 * (float) (zamer_adc_dma[ic] >>16);
+				if(flag_data_complit_for_Tx>0) { adc2_Tx[ic] = (zamer_adc_dma[ic] >>16); }
 				X_filter_2 += (float) ((zamer_adc_dma[ic] >>16));
 				V_filter_2 -= X_filter_2 * (R_filter);
 				X_filter_2 += V_filter_2 - X_filter_2 * L_filter;
 				filter_adc2[ic] = X_filter_2;
 				data_adc2[2*ic] = 0.001 * X_filter_2;
+				if(flag_data_complit_for_Tx>0) { data_adc2_Tx[ic] = data_adc2[2*ic]; }
 				//data_adc2[2*(ic-32)] = X_filter_2;
 				//data_adc2[2*(ic-32)] = (float) ((uint16_t) (zamer_adc1_2[ic] >>16));
 				//data_adc2[2*(ic-32+1)] =0;
 			}
+
+			if(flag_data_complit_for_Tx>0)
+				{
+					index_data_real_zamer =0;
+					flag_data_complit_for_Tx =0;
+				}
 
 //		for (uint16_t ic =0; ic < 32; ic=ic+2)//цикл отсоса массивов данных длится 16мкс -это без фильтрации, 264 мкс с фильтрацией(256), 534мкс фильтрация(512)
 //			{
@@ -711,11 +776,11 @@ int main(void)
 		  arm_cmplx_mag_f32(data_adc1, arr1_Output_f32, fftSize);
 		  arm_cmplx_mag_f32(data_adc2, arr2_Output_f32, fftSize);
 		  arr1_phase_Output_8_f32 = atan2f(data_adc1[17], data_adc1[16]);
-			  while(arr1_phase_Output_8_f32 > M_PI ) {arr1_phase_Output_8_f32 = arr1_phase_Output_8_f32 - M_PI; }
-			  while(arr1_phase_Output_8_f32 < (0-M_PI) ) {arr1_phase_Output_8_f32 = arr1_phase_Output_8_f32 + M_PI; }
+			  //while(arr1_phase_Output_8_f32 > M_PI ) {arr1_phase_Output_8_f32 = arr1_phase_Output_8_f32 - M_PI; }
+			  //while(arr1_phase_Output_8_f32 < (0-M_PI) ) {arr1_phase_Output_8_f32 = arr1_phase_Output_8_f32 + M_PI; }
 		  arr2_phase_Output_8_f32 = atan2f(data_adc2[17], data_adc2[16]);
-			  while(arr2_phase_Output_8_f32 > M_PI ) {arr2_phase_Output_8_f32 = arr2_phase_Output_8_f32 - M_PI; }
-			  while(arr2_phase_Output_8_f32 < (0-M_PI) ) {arr2_phase_Output_8_f32 = arr2_phase_Output_8_f32 + M_PI; }
+			  //while(arr2_phase_Output_8_f32 > M_PI ) {arr2_phase_Output_8_f32 = arr2_phase_Output_8_f32 - M_PI; }
+			  //while(arr2_phase_Output_8_f32 < (0-M_PI) ) {arr2_phase_Output_8_f32 = arr2_phase_Output_8_f32 + M_PI; }
 		  temp_phase_f32 = arr1_phase_Output_8_f32 - arr2_phase_Output_8_f32;
 //			  while(temp_phase_f32 > 2*M_PI ) {temp_phase_f32 = temp_phase_f32 - M_PI; }
 //			  while(temp_phase_f32 < (0-2*M_PI) ) {temp_phase_f32 = temp_phase_f32 + M_PI; }
@@ -812,8 +877,8 @@ int main(void)
 
 
 
-
-			for (uint16_t ic =0; ic <LENGTH_SAMPLES ; ic++)//обнулим место для нового пересчета, время на это == 1447мкс(8196) ==200мкс(1024), методом по циклу, почти тоже самое время
+		  	// size_data_adc1 = sizeof(data_adc1)/sizeof(data_adc1[0]); // делаем один раз при инициализации
+			for (uint16_t ic =0; ic < size_data_adc1  ; ic++)//обнулим место для нового пересчета, время на это == 1447мкс(8196) ==200мкс(1024), методом по циклу, почти тоже самое время
 				{
 					data_adc1[ic] =0;
 					data_adc2[ic] =0;
@@ -1020,10 +1085,16 @@ eMBErrorCode    eMBRegInputCB( UCHAR * pucRegBuffer, USHORT usAddress, USHORT us
 
 			 number_data_array=index_temp;
 
+			 index_data_real_zamer ++; // в ноль будет сбрасываться при окончании пересчета массивов данных, И после передачи всего пакета
+			 if (index_data_real_zamer > 1023) {index_data_real_zamer =1023; }
+
 			 // график не рисуется, здесь идет значение частоты
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!   -42 ошибка от реала, формируется здесь, выявлена при проверке через SpLab , значит на прием команды -42,  на передачу инфы +42 Гц
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!   -42 ошибка от реала, формируется здесь, выявлена при проверке через SpLab , значит на прием команды -42,  на передачу инфы +42 Гц
-			 temp_float = (float32_t) (freq_tim1 +42 ); // в этом месте всегда будет стоять текущая частота, пересчитаная из таймера назад
+			 if ((cmd_set.cmd_flags & 0x0010) >0)
+			 	 { temp_float = (float32_t) index_data_real_zamer; } // если будем долбить по кругу реальные замеры по времени
+			 else
+			 	 { temp_float = (float32_t) (freq_tim1 +42 ); } // в этом месте всегда будет стоять текущая частота, пересчитаная из таймера назад
 			 *pucRegBuffer++ = 	*(((uint8_t *) &temp_float) + 0); //
 			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 1);
 			 *pucRegBuffer++ =  *(((uint8_t *) &temp_float) + 2); //
@@ -1031,8 +1102,10 @@ eMBErrorCode    eMBRegInputCB( UCHAR * pucRegBuffer, USHORT usAddress, USHORT us
 
 			 // 1 график, сверху вниз
 			 temp_float = (float32_t) arr1_Output_f32[8]; //(zamer_adc_dma[number_data_array] & 0x0000FFFF);
-			 *pucRegBuffer++ = 	(uint8_t)number_data_array; // *(((uint8_t *) &temp_float) + 0); //
-			 *pucRegBuffer++ =	(uint8_t)number_data_array; //*(((uint8_t *) &temp_float) + 1);
+			 //*pucRegBuffer++ = 	(uint8_t)number_data_array; // *(((uint8_t *) &temp_float) + 0); //
+			 //*pucRegBuffer++ =	(uint8_t)number_data_array; //*(((uint8_t *) &temp_float) + 1);
+			 *pucRegBuffer++ = 	*(((uint8_t *) &temp_float) + 0); //
+			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 1);
 			 *pucRegBuffer++ =  *(((uint8_t *) &temp_float) + 2); //
 			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 3);
 
@@ -1073,29 +1146,37 @@ eMBErrorCode    eMBRegInputCB( UCHAR * pucRegBuffer, USHORT usAddress, USHORT us
 			 *pucRegBuffer++ =  *(((uint8_t *) &temp_float) + 2); //
 			 *pucRegBuffer++ = 	*(((uint8_t *) &temp_float) + 3);
 
-			 temp_float = arr_power_Output_8_f32; // (float32_t) data_U[number_data_array];
+			 // 7 график, adc1_Tx - реальные фактические данные АЦП-1
+			if (flag_data_complit_for_Tx ==0)
+			 {temp_float = (float) (adc1_Tx[index_data_real_zamer]);}
 			 *pucRegBuffer++ = 	*(((uint8_t *) &temp_float) + 0); //
 			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 1);
 			 *pucRegBuffer++ =  *(((uint8_t *) &temp_float) + 2); //
 			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 3);
 
-			 temp_float = arr_power_Output_8_f32; // (float32_t) data_R[number_data_array];
+			 // 8 график, data_adc2_Tx - фильтрованые  данные  после АЦП-1
+			if (flag_data_complit_for_Tx ==0)
+			 {temp_float = data_adc1_Tx[index_data_real_zamer];}
 			 *pucRegBuffer++ = 	*(((uint8_t *) &temp_float) + 0); //
 			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 1);
 			 *pucRegBuffer++ =  *(((uint8_t *) &temp_float) + 2); //
 			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 3);
 
-			 temp_float = arr_power_Output_8_f32; // (float32_t) data_Z[number_data_array];
+			 // 9 график, adc2_Tx - реальные фактические данные АЦП-2
+			if (flag_data_complit_for_Tx ==0)
+				{temp_float = (float) (adc2_Tx[index_data_real_zamer]);}
 			 *pucRegBuffer++ = 	*(((uint8_t *) &temp_float) + 0); //
 			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 1);
 			 *pucRegBuffer++ =  *(((uint8_t *) &temp_float) + 2); //
 			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 3);
 
-			 temp_float = arr_power_Output_8_f32; // (float32_t) data_X[number_data_array];
-			 *pucRegBuffer++ = 	73;//*(((uint8_t *) &temp_float) + 0); //
-			 *pucRegBuffer++ =	74;//*(((uint8_t *) &temp_float) + 1);
-			 *pucRegBuffer++ =  75;//*(((uint8_t *) &temp_float) + 2); //
-			 *pucRegBuffer++ =	76;//*(((uint8_t *) &temp_float) + 3);
+			 // 10 график, data_adc2_Tx - фильтрованые  данные  после АЦП-2
+			if (flag_data_complit_for_Tx ==0)
+			 {temp_float = data_adc2_Tx[index_data_real_zamer];}
+			 *pucRegBuffer++ =  *(((uint8_t *) &temp_float) + 0); //
+			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 1);
+			 *pucRegBuffer++ =  *(((uint8_t *) &temp_float) + 2); //
+			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 3);
 
 			 temp_float = arr_power_Output_8_f32; // (float32_t) data_Y[number_data_array];
 			 *pucRegBuffer++ = 	77;//*(((uint8_t *) &temp_float) + 0); //
