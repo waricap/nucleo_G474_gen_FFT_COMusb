@@ -1,6 +1,0 @@
-../Drivers/modbus/rtu/mbrtu.c:84:1:eMBRTUStop	8	static
-../Drivers/modbus/rtu/mbrtu.c:93:1:eMBRTUReceive	32	static
-../Drivers/modbus/rtu/mbrtu.c:128:1:eMBRTUSend	24	static
-../Drivers/modbus/rtu/mbrtu.c:180:1:xMBRTUReceiveFSM	16	static
-../Drivers/modbus/rtu/mbrtu.c:246:1:xMBRTUTransmitFSM	16	static
-../Drivers/modbus/rtu/mbrtu.c:277:1:xMBRTUTimerT35Expired	16	static

@@ -29,7 +29,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "stdio.h"
-#include "math.h"
+//#include "math.h"
 #include "arm_const_structs.h"
 #include "stdbool.h"
 #include "mb.h"
@@ -226,8 +226,12 @@ volatile	uint16_t * temp_adr16;
  static float32_t arr2_Output_f32[LENGTH_SAMPLES*2];
   float32_t arr1_phase_Output_8_f32;
   float32_t arr2_phase_Output_8_f32;
-  float32_t arr_power_Output_8_f32;
-  float32_t temp_phase_f32;
+  float32_t calc_power_Output_8_f32;
+  float32_t shift_phase_I8_U8_f32;
+  float32_t shift_phase_I8_U8_f32_display;
+  float32_t	cos_phase_8_f32;
+  float32_t	atan_phase_8_f32;
+  float32_t calc_R_Output_8_f32;
 
  /* ------------------------------------------------------------------
  * Global variables for FFT Bin Example
@@ -237,7 +241,7 @@ volatile	uint16_t * temp_adr16;
  uint32_t doBitReverse = 1;
  uint16_t fft_N =  512;  // [] = {256, 512, 1024, 2048, 4096}; // массив точек расчета
  uint32_t freq_tim1; //частота, которую выдает TIM1
- uint32_t freq_tim1_float; //частота, которую выдает TIM1
+ float32_t freq_tim1_float; //частота, которую выдает TIM1
  float32_t F_bin;
  float32_t koeff;
  float ln_x3, ln_x4, ln_x5;
@@ -394,6 +398,7 @@ int main(void)
   MX_CRC_Init();
   MX_TIM17_Init();
   /* USER CODE BEGIN 2 */
+  // TIM2 - стартует каждый замер на ADC1_2,  tim2 capture compare 2 event - делит на 2 ITR10, который идёт от HRTIM, этот же ITR10 делает период TIM1-ключи через 128 раз, те на период TIM1-ключи укладывается 64 замера ADC1_2
   // TIM6 - используем для модбуса, делает прерывания через 50uS, а там библиотека ModBUS  работает
   // TIM7 - используется для барабанной передачи данных по модбусу, выдает тики 100uS, прерывания нет, в цикле смотрим CNT
   // TIM16 - используем для увеличения уменьшения мощности, выдает тики 1uS, прерывания нет, в цикле смотрим CNT
@@ -458,6 +463,7 @@ int main(void)
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3); 	// плечо №2-низ PС2
   HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_3); 	// плечо №2-верх PB9
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_4);		// запаздывание CH3 относительно CH1 - это ширина импульса накачки, мощность
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2); 	// PA9 синхро�?мпульс - начало периода переключения ключей
 
   HAL_TIM_Base_Start(&htim7); // tim7 тактуется 10 MHz, по условию if (htim7.Instance->CNT >100)   будет включаться передача ModBUS_TX
   HAL_TIM_Base_Start(&htim16);// tim16 тактуется 1 MHz,  по условию if (htim16.Instance->CNT >10000)   будет плавно меняться мощность на одну ступеньку
@@ -482,7 +488,8 @@ int main(void)
 			data_adc2[ic] =0;
 		}
 
-	  /* Select Callbacks functions called after Transfer complete and Transfer error */
+	  // Select Callbacks functions called after Transfer complete and Transfer error
+	  // Выберите функции Callbacks, вызываемые после завершения передачи и Ошибки передачи
 	  HAL_DMA_RegisterCallback(&hdma_memtomem_dma1_channel4, HAL_DMA_XFER_CPLT_CB_ID, Mem_to_Mem_Complete);
 	  HAL_DMA_Start_IT(&hdma_memtomem_dma1_channel4, (uint32_t)zamer_adc1_2, (uint32_t)zamer_adc_dma, LENGTH_SAMPLES);
 
@@ -500,38 +507,44 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-	  uint16_t Num=0;
+
 	  uint16_t usCRC16_main;
   while (1)
   {
-	  if (((cmd_set.cmd_flags & 0x0004) >0) | ((cmd_set.cmd_flags & 0x0010) >0))// если надо, по флагу, вот тут будет включаться циклическая долбежка
+	  if (cmd_set.flag_ON_TxData_cicle == true)// если надо, по флагу, вот тут будет включаться циклическая долбежка
 	  {
                   // TIM7 - используется для барабанной передачи данных по модбусу, выдает тики 100uS, прерывания нет, в цикле смотрим CNT
 		  	  	  // 25 mS  минимальный интервал между передачами, при котором минимум ошибок CRC
-              	  if (htim7.Instance->CNT >250) // tim7 тактуется 10 MHz, по условию if (htim7.Instance->CNT >100)   будет включаться передача ModBUS_TX
+              	  //if (htim7.Instance->CNT >250) // tim7 тактуется 10 MHz, по условию if (htim7.Instance->CNT >100)   будет включаться передача ModBUS_TX
+              	  if ((htim7.Instance->CNT >250) & (flag_data_complit_for_Tx ==0))
               	  {
               		  htim7.Instance->CNT =0;
               		  	send_buff_cicle[0] = MB_ADDRESS;
 						send_buff_cicle[1] = 4;  // заглушка-обманка
 						send_buff_cicle[2] = 80; // заглушка-обманка, типа длина данных
-						if (eSndState != STATE_TX_XMIT)/* Activate the transmitter. */
+
+						if ( cmd_set.flag_ON_scan_time == true)
 						{
-							eMBRegInputCB( &(send_buff_cicle[3]), 64, Num /*номер элемента массива замеров*/ );
-							usCRC16_main = HAL_CRC_Calculate(&hcrc, ( uint32_t *)(&send_buff_cicle), 83);//смотрим сколько натикало -цикл HAL_CRC_Calculate(85char) длится 11.30мкс (1921 тика)
-							send_buff_cicle[83] = ( UCHAR )( usCRC16_main & 0xFF );
-							send_buff_cicle[84] = ( UCHAR )( usCRC16_main >> 8 );
-							vMBPortSerialEnable( FALSE, TRUE );
-							eSndState = STATE_TX_XMIT;
-							if ( HAL_OK == HAL_UART_Transmit_DMA(adr_huart_MB, send_buff_cicle, 85))
-							{
-								if (flag_exti_stop_TX_cicles >0)
-								{
-									flag_exti_stop_TX_cicles =0;
-									Num++;
-									if (Num >999) { Num =0;}
-								}
-							}
+							// if ( HAL_OK == HAL_UART_Transmit_DMA(adr_huart_MB, send_buff_cicle, 85))
+								{ index_data_real_zamer = index_data_real_zamer +2; }
+							if (index_data_real_zamer >1021)
+								{ index_data_real_zamer =0; }
+							fun_data_time_podgotovka( &(send_buff_cicle[3]), index_data_real_zamer/*номер элемента массива замеров*/ );
 						}
+
+						if ( cmd_set.flag_ON_scan_freq == true)
+						{
+							// if ( HAL_OK == HAL_UART_Transmit_DMA(adr_huart_MB, send_buff_cicle, 85))
+							fun_data_scan_freq_podgotovka( &(send_buff_cicle[3]), freq_tim1_float/*номер элемента массива замеров*/ );
+						}
+
+						usCRC16_main = HAL_CRC_Calculate(&hcrc, ( uint32_t *)(&send_buff_cicle), 83);//смотрим сколько натикало -цикл HAL_CRC_Calculate(85char) длится 11.30мкс (1921 тика)
+						send_buff_cicle[83] = ( UCHAR )( usCRC16_main & 0xFF );
+						send_buff_cicle[84] = ( UCHAR )( usCRC16_main >> 8 );
+						vMBPortSerialEnable( FALSE, TRUE );
+						HAL_UART_Transmit_DMA(adr_huart_MB, send_buff_cicle, 85);
+						//if ( HAL_OK == HAL_UART_Transmit_DMA(adr_huart_MB, send_buff_cicle, 85))
+						//	{ HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_10); }
               	  }
 	  }
 	  else
@@ -551,14 +564,19 @@ int main(void)
 	    	  if (count_press_blue_btn >5)
 	    	  {
 	    		  count_press_blue_btn=5;
-	    		  cmd_set.cmd_flags =0;  // тотальный стоп
+	    		  //cmd_set.cmd_flags =0;  // тотальный стоп
+	    		  cmd_set.flag_ON_generation = false;
+	    		  cmd_set.flag_ON_TxData_cicle = false;
+	    		  cmd_set.flag_ON_scan_freq = false;
+	    		  cmd_set.flag_ON_scan_time = false;
+	    		  cmd_set.flag_ON_autoTuning_freq = false;
 	    	  }
 	      }
 	      else
 	      { count_press_blue_btn =0; } // HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 
 
-		  if ((cmd_set.cmd_flags & 0x0001) >0)// Reg_CMD_Buf[0].0 - флаг-команда Включить Генерацию
+		  if (cmd_set.flag_ON_generation == true)// Reg_CMD_Buf[0].0 - флаг-команда Включить Генерацию
 	  		{
 	  			if (step_power_procent > cmd_set.proc_pwr /*power_procent*/) {step_power_procent --;}
 	  			if (step_power_procent < cmd_set.proc_pwr /*power_procent*/) {step_power_procent ++;}
@@ -596,7 +614,7 @@ int main(void)
 												adc1_Tx[ic] =0;
 												adc2_Tx[ic] =0;
 											}
-										index_data_real_zamer =0; // подготовка для замера
+										index_data_real_zamer =800; // подготовка для замера
 										break;
 									}// if (HAL_OK == HAL_TIM_GenerateEvent(&htim1, TIM_EventSource_Break))
 								} // for(int i=0; i<100; i++)
@@ -660,7 +678,7 @@ int main(void)
 	  freq_tim1 = 5440000000 / (hhrtim1.Instance->sMasterRegs.MPER) / 128; // это есть выходная частота, tim1->ARR == 127  всегда ==> делитель=128
 	  freq_tim1_float = (float)freq_tim1;
 
-	  if (((cmd_set.cmd_flags & 0x0010) >0) & (index_data_real_zamer >1000))
+	  if ((cmd_set.flag_ON_scan_time == true) & (index_data_real_zamer >1000))
 	  	  { flag_data_complit_for_Tx = 255; }
 
 	  if (flag_end_FFT ==0) // flag_complit_ADC ==1 означает что все замеры сделаны
@@ -776,15 +794,20 @@ int main(void)
 		  arm_cmplx_mag_f32(data_adc1, arr1_Output_f32, fftSize);
 		  arm_cmplx_mag_f32(data_adc2, arr2_Output_f32, fftSize);
 		  arr1_phase_Output_8_f32 = atan2f(data_adc1[17], data_adc1[16]);
-			  //while(arr1_phase_Output_8_f32 > M_PI ) {arr1_phase_Output_8_f32 = arr1_phase_Output_8_f32 - M_PI; }
-			  //while(arr1_phase_Output_8_f32 < (0-M_PI) ) {arr1_phase_Output_8_f32 = arr1_phase_Output_8_f32 + M_PI; }
+		  	  while(arr1_phase_Output_8_f32 > M_PI ) {arr1_phase_Output_8_f32 = arr1_phase_Output_8_f32 - M_PI; }
+		      while(arr1_phase_Output_8_f32 < -M_PI) {arr1_phase_Output_8_f32 = arr1_phase_Output_8_f32 + M_PI; }
 		  arr2_phase_Output_8_f32 = atan2f(data_adc2[17], data_adc2[16]);
-			  //while(arr2_phase_Output_8_f32 > M_PI ) {arr2_phase_Output_8_f32 = arr2_phase_Output_8_f32 - M_PI; }
-			  //while(arr2_phase_Output_8_f32 < (0-M_PI) ) {arr2_phase_Output_8_f32 = arr2_phase_Output_8_f32 + M_PI; }
-		  temp_phase_f32 = arr1_phase_Output_8_f32 - arr2_phase_Output_8_f32;
-//			  while(temp_phase_f32 > 2*M_PI ) {temp_phase_f32 = temp_phase_f32 - M_PI; }
-//			  while(temp_phase_f32 < (0-2*M_PI) ) {temp_phase_f32 = temp_phase_f32 + M_PI; }
-		  arr_power_Output_8_f32 = arr1_Output_f32[8] * arr2_Output_f32[8] *arm_cos_f32(temp_phase_f32);
+			  while(arr2_phase_Output_8_f32 > 0 ) {arr2_phase_Output_8_f32 = arr2_phase_Output_8_f32 - 2*M_PI; }
+			  while(arr2_phase_Output_8_f32 < -2*M_PI ) {arr2_phase_Output_8_f32 = arr2_phase_Output_8_f32 + 2*M_PI; }
+
+			  shift_phase_I8_U8_f32 = arr1_phase_Output_8_f32 - arr2_phase_Output_8_f32;
+//			  	  while(shift_phase_I8_U8_f32 > M_PI/2 ) {shift_phase_I8_U8_f32 = shift_phase_I8_U8_f32 - M_PI/2; }
+//			  	  while(shift_phase_I8_U8_f32 < -M_PI/2 ) {shift_phase_I8_U8_f32 = shift_phase_I8_U8_f32 + M_PI/2; }
+		  cos_phase_8_f32 = arm_cos_f32(shift_phase_I8_U8_f32);
+		  atan_phase_8_f32 = atanf(tanf(shift_phase_I8_U8_f32));
+		  calc_power_Output_8_f32	= arr2_Output_f32[8] * arr1_Output_f32[8] * cos_phase_8_f32; // arr2_ == U    arr1_ == I
+		  calc_R_Output_8_f32 		= arr2_Output_f32[8] / arr1_Output_f32[8] * cos_phase_8_f32; // arr2_ == U    arr1_ == I
+		  //shift_phase_I8_U8_f32_display =
 
 		  // тут будем расчитывать смещение частоты, которое нужно после FFT
 		// F_bin = F *64/256 = F / 4 ;
@@ -792,7 +815,7 @@ int main(void)
 		// F_bin = F *64/1024 = F / 16 ;
 		// Koeff = (arr1_Output_f32[5] -arr1_Output_f32[3]) / (2*(2*arr1_Output_f32[4] -arr1_Output_f32[5] -arr1_Output_f32[3]));
 		// freq_new = F_bin * N + Koeff * F_bin;   // для этого случая N==4
-		  if (((cmd_set.cmd_flags & 0x0001) >0) & ((cmd_set.cmd_flags & 0x0002) ==0) & ((cmd_set.cmd_flags & 0x0008) >0)) // автоподстройка частоты
+		  if ((cmd_set.flag_ON_generation ==true) & (cmd_set.flag_ON_autoTuning_freq ==true) & (cmd_set.flag_ON_scan_freq ==false) & (cmd_set.flag_ON_scan_time ==false)) // автоподстройка частоты
 		  {
 			if (fft_N ==256)
 			{
@@ -889,7 +912,7 @@ int main(void)
 	  // freq_new - вычислена выше для типа автоподдержания частоты
 	  // если получаем бит сканирования по частоте,  cmd_set.cmd_flags.1
 	  // ============================================  сканирование по частоте  ================================================
-	  if (((cmd_set.cmd_flags & 0x0001) >0) & ((cmd_set.cmd_flags & 0x0002) >0)) // скольжение по частоте
+	  if ((cmd_set.flag_ON_generation ==true) & (cmd_set.flag_ON_scan_freq ==true)) // скольжение по частоте
 	  {
 		  if (htim17.Instance->CNT > (cmd_set.time_step *10) )
 		  {
@@ -907,13 +930,16 @@ int main(void)
 		  }
 	  }
 	  // ============================================  стоять на одной частоте  ================================================
-	  if (((cmd_set.cmd_flags & 0x0001) >0) & ((cmd_set.cmd_flags & 0x0002) ==0) & ((cmd_set.cmd_flags & 0x0008) ==0)) // стоять на одной частоте
+	  if ((cmd_set.flag_ON_generation ==true) & (cmd_set.flag_ON_scan_freq ==false) & (cmd_set.flag_ON_autoTuning_freq ==false)) // стоять на одной частоте
 	  {
-		  old_freq_new = freq_new;
-		  freq_new = cmd_set.freq_start;
+		  old_freq_new = freq_new;		//  при  cmd_set.flag_ON_scan_freq      новая частота будет формироваться при сканировании
+		  freq_new = cmd_set.freq_start; // при  cmd_set.flag_ON_autoTuning_freq  новую частоту будем вычислять после FFT преобразования
 	  }
+	  if (cmd_set.flag_ON_generation ==false)
+		  { index_data_real_zamer = 1024; } // чтобы при сканировании по времени, передача начиналась сразу, не надо было ждать
+
 	  // ============================================  автоподстройка частоты  ================================================
-	  if (((cmd_set.cmd_flags & 0x0001) >0) & ((cmd_set.cmd_flags & 0x0002) ==0) & ((cmd_set.cmd_flags & 0x0008) >0)) // автоподстройка частоты
+	  if ((cmd_set.flag_ON_generation ==true) & (cmd_set.flag_ON_autoTuning_freq ==true) & (cmd_set.flag_ON_scan_freq ==false) & (cmd_set.flag_ON_scan_time ==false)) // автоподстройка частоты
 	  {
 			if (old_freq_new >0)// надо проверить, чтобы не выскакивало за пределы
 				{
@@ -1085,108 +1111,12 @@ eMBErrorCode    eMBRegInputCB( UCHAR * pucRegBuffer, USHORT usAddress, USHORT us
 
 			 number_data_array=index_temp;
 
-			 index_data_real_zamer ++; // в ноль будет сбрасываться при окончании пересчета массивов данных, И после передачи всего пакета
-			 if (index_data_real_zamer > 1023) {index_data_real_zamer =1023; }
 
 			 // график не рисуется, здесь идет значение частоты
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!   -42 ошибка от реала, формируется здесь, выявлена при проверке через SpLab , значит на прием команды -42,  на передачу инфы +42 Гц
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!   -42 ошибка от реала, формируется здесь, выявлена при проверке через SpLab , значит на прием команды -42,  на передачу инфы +42 Гц
-			 if ((cmd_set.cmd_flags & 0x0010) >0)
-			 	 { temp_float = (float32_t) index_data_real_zamer; } // если будем долбить по кругу реальные замеры по времени
-			 else
-			 	 { temp_float = (float32_t) (freq_tim1 +42 ); } // в этом месте всегда будет стоять текущая частота, пересчитаная из таймера назад
+			  temp_float = (float32_t) (freq_tim1 +42 );  // в этом месте всегда будет стоять текущая частота, пересчитаная из таймера назад
 			 *pucRegBuffer++ = 	*(((uint8_t *) &temp_float) + 0); //
-			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 1);
-			 *pucRegBuffer++ =  *(((uint8_t *) &temp_float) + 2); //
-			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 3);
-
-			 // 1 график, сверху вниз
-			 temp_float = (float32_t) arr1_Output_f32[8]; //(zamer_adc_dma[number_data_array] & 0x0000FFFF);
-			 //*pucRegBuffer++ = 	(uint8_t)number_data_array; // *(((uint8_t *) &temp_float) + 0); //
-			 //*pucRegBuffer++ =	(uint8_t)number_data_array; //*(((uint8_t *) &temp_float) + 1);
-			 *pucRegBuffer++ = 	*(((uint8_t *) &temp_float) + 0); //
-			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 1);
-			 *pucRegBuffer++ =  *(((uint8_t *) &temp_float) + 2); //
-			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 3);
-
-			 // 2 график, сверху вниз
-			 temp_float = (float32_t) arr2_Output_f32[8]; // ((zamer_adc_dma[number_data_array] >>16));
-			 *pucRegBuffer++ = 	*(((uint8_t *) &temp_float) + 0); //
-			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 1);
-			 *pucRegBuffer++ =  *(((uint8_t *) &temp_float) + 2); //
-			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 3);
-
-			 // 3 график, сверху вниз
-			 temp_float = arr1_phase_Output_8_f32; // filter_adc1[number_data_array];
-			 *pucRegBuffer++ = 	*(((uint8_t *) &temp_float) + 0); //
-			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 1);
-			 *pucRegBuffer++ =  *(((uint8_t *) &temp_float) + 2); //
-			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 3);
-
-			 // 4 график, сверху вниз
-			 //float ugol_rad = (float)(freq_tim1 -19500)*0.002 * M_PI - M_PI;
-			 //temp_float = atan2f(cosf(ugol_rad), sinf(ugol_rad));     //
-			 temp_float = arr2_phase_Output_8_f32; // filter_adc2[number_data_array];
-			 *pucRegBuffer++ = 	*(((uint8_t *) &temp_float) + 0); //
-			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 1);
-			 *pucRegBuffer++ =  *(((uint8_t *) &temp_float) + 2); //
-			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 3);
-
-			 // 5 график, сверху вниз
-			 temp_float = temp_phase_f32; // (float32_t) arr1_Output_f32[number_data_array];
-			 *pucRegBuffer++ = 	*(((uint8_t *) &temp_float) + 0); //
-			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 1);
-			 *pucRegBuffer++ =  *(((uint8_t *) &temp_float) + 2); //
-			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 3);
-
-			 // 6 график, сверху вниз
-			 temp_float = arr_power_Output_8_f32; // (float32_t) arr1_Output_f32[number_data_array];
-			 *pucRegBuffer++ = 	*(((uint8_t *) &temp_float) + 0); //
-			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 1);
-			 *pucRegBuffer++ =  *(((uint8_t *) &temp_float) + 2); //
-			 *pucRegBuffer++ = 	*(((uint8_t *) &temp_float) + 3);
-
-			 // 7 график, adc1_Tx - реальные фактические данные АЦП-1
-			if (flag_data_complit_for_Tx ==0)
-			 {temp_float = (float) (adc1_Tx[index_data_real_zamer]);}
-			 *pucRegBuffer++ = 	*(((uint8_t *) &temp_float) + 0); //
-			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 1);
-			 *pucRegBuffer++ =  *(((uint8_t *) &temp_float) + 2); //
-			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 3);
-
-			 // 8 график, data_adc2_Tx - фильтрованые  данные  после АЦП-1
-			if (flag_data_complit_for_Tx ==0)
-			 {temp_float = data_adc1_Tx[index_data_real_zamer];}
-			 *pucRegBuffer++ = 	*(((uint8_t *) &temp_float) + 0); //
-			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 1);
-			 *pucRegBuffer++ =  *(((uint8_t *) &temp_float) + 2); //
-			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 3);
-
-			 // 9 график, adc2_Tx - реальные фактические данные АЦП-2
-			if (flag_data_complit_for_Tx ==0)
-				{temp_float = (float) (adc2_Tx[index_data_real_zamer]);}
-			 *pucRegBuffer++ = 	*(((uint8_t *) &temp_float) + 0); //
-			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 1);
-			 *pucRegBuffer++ =  *(((uint8_t *) &temp_float) + 2); //
-			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 3);
-
-			 // 10 график, data_adc2_Tx - фильтрованые  данные  после АЦП-2
-			if (flag_data_complit_for_Tx ==0)
-			 {temp_float = data_adc2_Tx[index_data_real_zamer];}
-			 *pucRegBuffer++ =  *(((uint8_t *) &temp_float) + 0); //
-			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 1);
-			 *pucRegBuffer++ =  *(((uint8_t *) &temp_float) + 2); //
-			 *pucRegBuffer++ =	*(((uint8_t *) &temp_float) + 3);
-
-			 temp_float = arr_power_Output_8_f32; // (float32_t) data_Y[number_data_array];
-			 *pucRegBuffer++ = 	77;//*(((uint8_t *) &temp_float) + 0); //
-			 *pucRegBuffer++ =	78;//*(((uint8_t *) &temp_float) + 1);
-			 *pucRegBuffer++ =  79;//*(((uint8_t *) &temp_float) + 2); //
-			 *pucRegBuffer++ =	80;//*(((uint8_t *) &temp_float) + 3);
-
-
-			//	count_tic_finish = DWT_CYCCNT;//смотрим сколько натикало -цикл формирования массивов данных длится 4.894мкс (832 тика)
-			//	count_tic_float_mks = (float)count_tic_finish * 1000000 / SystemCoreClock;
 
     return eStatus;
 }
@@ -1251,6 +1181,12 @@ eMBErrorCode    eMBRegHoldingCB( UCHAR * pucRegBuffer, USHORT usAddress,  USHORT
                 usNRegs--;
             }
             cmd_set.cmd_flags	= Reg_CMD_Buf[0];	//	Reg_CMD_Buf[0] - регистр флагов-команд, приходящих для исполнения
+            cmd_set.flag_ON_generation = 	Reg_CMD_Buf[0] & 0b0000000000000001;	// Reg_CMD_Buf[0].0 - флаг-команда Включить Генерацию
+            cmd_set.flag_ON_scan_freq = 	Reg_CMD_Buf[0] & 0b0000000000000010;	// Reg_CMD_Buf[0].1 - флаг-команда Вкл. Скольжение по диапазону, в соответствии с задаными регистрами
+            cmd_set.flag_ON_TxData_cicle = 	Reg_CMD_Buf[0] & 0b0000000000000100;	// Reg_CMD_Buf[0].2 - флаг-команда Вкл. долбежку передачи данных по кругу, прием при этом прекратиться, стоповать можно будет только синей кнопкой
+            cmd_set.flag_ON_autoTuning_freq=Reg_CMD_Buf[0] & 0b0000000000001000;	// Reg_CMD_Buf[0].3 - флаг-команда при включеной генерации автоподстройка частоты будет работать, если включен флаг скольжения, этот флаг игнорится
+            cmd_set.flag_ON_scan_time = 	Reg_CMD_Buf[0] & 0b0000000000010000;	// Reg_CMD_Buf[0].4 - флаг-команда на вкл генерации на одной частоте, и циклическую передачу сигналов КЛЮЧ�?, ТОК и НАПРЯЖЕН�?Е в реале, как есть из замера
+
             cmd_set.proc_pwr	= Reg_CMD_Buf[1];	//	Reg_CMD_Buf[1] - регистр мощности,  2-98% заполнения
    // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!   -42 ошибка от реала, формируется здесь, выявлена при проверке через SpLab , значит на прием команды -42,  на передачу инфы +42 Гц
             cmd_set.freq_start	= Reg_CMD_Buf[2] -42;	// Reg_CMD_Buf[2] - регистр стартовой частоты, 14500-43000
@@ -1324,11 +1260,217 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) // CDCDataReceivedCallba
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
-	// включаем прием LPUART, ждём настроечных данных
+	// включаем прием LPUART, ждём настроечных данных+
 //	status_RX_LPuart = HAL_UART_Receive_DMA(&hlpuart1, (uint8_t *) cmd_array_SPI, len_cmd_array_SPI);
 //	HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin); // Led green
 	return;
 }
+
+uint16_t fun_data_time_podgotovka( uint8_t * buffer_data_time, uint16_t index_data_time_zamer )
+{
+	if (cmd_set.flag_ON_scan_time ==false)
+		{ return 0;  }
+
+	// эта фун осталась как заглушка, значения в буфер  buffer_data_time  закладываются в конце обработки замера
+    // заморачиваться с сообщением об ошибке не будем, тупо отправить в ответ последние элементы пакета массивов, и все
+
+	// DWT_CYCCNT =0;// обнуляем значение
+	// DWT_CONTROL|= DWT_CTRL_CYCCNTENA_Msk; // включаем счётчик
+	// Какой-то код
+	//			 какой то код
+
+			 // index_data_real_zamer ++; // в ноль будет сбрасываться при окончании пересчета массивов данных, �? после передачи всего пакета
+			 if (index_data_time_zamer > 1022)
+			 	 {index_data_time_zamer =1022; }
+
+			 temp_float = (float) index_data_time_zamer;  // index-NUMBER index-NUMBER index-NUMBER index-NUMBER index-NUMBER   если будем долбить по кругу реальные замеры по времени
+			 *buffer_data_time++ = 	*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_time++ =	*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_time++ =  *(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_time++ =	*(((uint8_t *) &temp_float) + 3);
+
+			 // 1 график, сверху вниз     adc1_Tx - реальные фактические данные АЦП-1  X0
+			 temp_float = (float) adc1_Tx[index_data_time_zamer]; //
+			 *buffer_data_time++ = 	*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_time++ =	*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_time++ =  *(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_time++ =	*(((uint8_t *) &temp_float) + 3);
+
+			 // 1 график, сверху вниз     adc1_Tx - реальные фактические данные АЦП-1  X0+1
+			 temp_float = (float) adc1_Tx[index_data_time_zamer +1];
+			 *buffer_data_time++ = 	*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_time++ =	*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_time++ =  *(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_time++ =	*(((uint8_t *) &temp_float) + 3);
+
+			 // 2 график, сверху вниз		data_adc2_Tx - фильтрованые  данные  после АЦП-1   X0
+			 temp_float = data_adc1_Tx[index_data_time_zamer];
+			 *buffer_data_time++ = 	*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_time++ =	*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_time++ =  *(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_time++ =	*(((uint8_t *) &temp_float) + 3);
+
+			 // 2 график, сверху вниз		data_adc2_Tx - фильтрованые  данные  после АЦП-1   X0+1
+			 temp_float = data_adc1_Tx[index_data_time_zamer +1];
+			 *buffer_data_time++ = 	*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_time++ =	*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_time++ =  *(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_time++ =	*(((uint8_t *) &temp_float) + 3);
+
+			 // 3 график, сверху вниз		adc2_Tx - реальные фактические данные АЦП-2    X0
+			 temp_float = (float) (adc2_Tx[index_data_time_zamer]);
+			 *buffer_data_time++ = 	*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_time++ =	*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_time++ =  *(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_time++ =	*(((uint8_t *) &temp_float) + 3);
+
+			 // 3 график, сверху вниз		adc2_Tx - реальные фактические данные АЦП-2    X0+1
+			 temp_float = (float) (adc2_Tx[index_data_time_zamer +1]);
+			 *buffer_data_time++ = 	*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_time++ =	*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_time++ =  *(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_time++ = 	*(((uint8_t *) &temp_float) + 3);
+
+			 // 4 график, сверху вниз		data_adc2_Tx - фильтрованые  данные  после АЦП-2    X0
+			 temp_float = data_adc2_Tx[index_data_time_zamer];
+			 *buffer_data_time++ = 	*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_time++ =	*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_time++ =  *(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_time++ =	*(((uint8_t *) &temp_float) + 3);
+
+			 // 4 график, сверху вниз		data_adc2_Tx - фильтрованые  данные  после АЦП-2    X0+1
+			 temp_float = data_adc2_Tx[index_data_time_zamer +1];
+			 *buffer_data_time++ = 	*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_time++ =	*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_time++ =  *(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_time++ =	*(((uint8_t *) &temp_float) + 3);
+
+			 // 5 график, сверху вниз
+			 temp_float = (float) (adc2_Tx[index_data_time_zamer]);
+			 *buffer_data_time++ = 	69;//*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_time++ =	70;//*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_time++ =  71;//*(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_time++ =	72;//*(((uint8_t *) &temp_float) + 3);
+
+			 // 5 график, сверху вниз
+			 temp_float = data_adc2_Tx[index_data_time_zamer];
+			 *buffer_data_time++ =  73;//*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_time++ =	74;//*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_time++ =  75;//*(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_time++ =	76;//*(((uint8_t *) &temp_float) + 3);
+
+			 temp_float = calc_power_Output_8_f32; // (float32_t) data_Y[number_data_array];
+			 *buffer_data_time++ = 	77;//*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_time++ =	78;//*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_time++ =  79;//*(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_time++ =	80;//*(((uint8_t *) &temp_float) + 3);
+
+			//	count_tic_finish = DWT_CYCCNT;//смотрим сколько натикало -цикл формирования массивов данных длится 4.894мкс (832 тика)
+			//	count_tic_float_mks = (float)count_tic_finish * 1000000 / SystemCoreClock;
+
+    return index_data_time_zamer;
+}
+
+void fun_data_scan_freq_podgotovka( uint8_t * buffer_data_scan_freq,  float32_t freq_float )
+{
+	//if ((freq_float <14500) | (freq_float >43000))
+	//{ return HAL_ERROR; }
+    // заморачиваться разборками об ошибке не будем, тупо отправить в ответ последние элементы пакета массивов, и все
+
+	// DWT_CYCCNT =0;// обнуляем значение
+	// DWT_CONTROL|= DWT_CTRL_CYCCNTENA_Msk; // включаем счётчик
+	// Какой-то код
+	//			 какой то код
+
+			 // график не рисуется, здесь идет значение частоты
+// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!   -42 ошибка от реала, формируется здесь, выявлена при проверке через SpLab , значит на прием команды -42,  на передачу инфы +42 Гц
+// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!   -42 ошибка от реала, формируется здесь, выявлена при проверке через SpLab , значит на прием команды -42,  на передачу инфы +42 Гц
+			  temp_float =  (freq_float +42 );  // в этом месте всегда будет стоять текущая частота, пересчитаная из таймера назад
+			 *buffer_data_scan_freq++ = 	*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_scan_freq++ =	*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_scan_freq++ =  *(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_scan_freq++ =	*(((uint8_t *) &temp_float) + 3);
+
+			 // 1 график, сверху вниз
+			 temp_float = (float32_t) arr1_Output_f32[8]; //
+			 *buffer_data_scan_freq++ = 	*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_scan_freq++ =	*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_scan_freq++ =  *(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_scan_freq++ =	*(((uint8_t *) &temp_float) + 3);
+
+			 // 2 график, сверху вниз
+			 temp_float = (float32_t) arr2_Output_f32[8]; //
+			 *buffer_data_scan_freq++ = 	*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_scan_freq++ =	*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_scan_freq++ =  *(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_scan_freq++ =	*(((uint8_t *) &temp_float) + 3);
+
+			 // 3 график, сверху вниз
+			 temp_float = arr1_phase_Output_8_f32; //
+			 *buffer_data_scan_freq++ = 	*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_scan_freq++ =	*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_scan_freq++ =  *(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_scan_freq++ =	*(((uint8_t *) &temp_float) + 3);
+
+			 // 4 график, сверху вниз
+			 temp_float = arr2_phase_Output_8_f32; //
+			 *buffer_data_scan_freq++ = 	*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_scan_freq++ =	*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_scan_freq++ =  *(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_scan_freq++ =	*(((uint8_t *) &temp_float) + 3);
+
+			 // 5 график, сверху вниз
+			 temp_float =  shift_phase_I8_U8_f32; // (float32_t)
+			 *buffer_data_scan_freq++ = 	*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_scan_freq++ =	*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_scan_freq++ =  *(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_scan_freq++ =	*(((uint8_t *) &temp_float) + 3);
+
+			 // 6 график, сверху вниз
+			 temp_float =   calc_power_Output_8_f32; //
+			 *buffer_data_scan_freq++ = 	*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_scan_freq++ =	*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_scan_freq++ =  *(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_scan_freq++ = 	*(((uint8_t *) &temp_float) + 3);
+
+			 // 7 график, сверху вниз
+			 temp_float = calc_R_Output_8_f32;
+			 *buffer_data_scan_freq++ = 	*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_scan_freq++ =	*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_scan_freq++ =  *(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_scan_freq++ =	*(((uint8_t *) &temp_float) + 3);
+
+			 // 8 график, сверху вниз
+			 temp_float = 8;
+			 *buffer_data_scan_freq++ = 	65;//*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_scan_freq++ =	66;//*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_scan_freq++ =  67;//*(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_scan_freq++ =	68;//*(((uint8_t *) &temp_float) + 3);
+
+			 // 9 график, сверху вниз
+			 temp_float = 9;
+			 *buffer_data_scan_freq++ = 	*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_scan_freq++ =	*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_scan_freq++ =  *(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_scan_freq++ =	*(((uint8_t *) &temp_float) + 3);
+
+			 // 10 график, сверху вниз
+			 temp_float = 10;
+			 *buffer_data_scan_freq++ =  *(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_scan_freq++ =	*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_scan_freq++ =  *(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_scan_freq++ =	*(((uint8_t *) &temp_float) + 3);
+
+			 // 11 график, сверху вниз
+			 temp_float = 11;
+			 *buffer_data_scan_freq++ = 	*(((uint8_t *) &temp_float) + 0); //
+			 *buffer_data_scan_freq++ =	*(((uint8_t *) &temp_float) + 1);
+			 *buffer_data_scan_freq++ =  *(((uint8_t *) &temp_float) + 2); //
+			 *buffer_data_scan_freq++ =	*(((uint8_t *) &temp_float) + 3);
+
+	//return HAL_OK;
+}
+
 /* USER CODE END 4 */
 
 /**

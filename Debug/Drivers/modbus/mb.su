@@ -1,3 +1,0 @@
-../Drivers/modbus/mb.c:124:1:eMBInit	16	static
-../Drivers/modbus/mb.c:190:1:eMBEnable	8	static
-../Drivers/modbus/mb.c:211:1:eMBPoll	24	static

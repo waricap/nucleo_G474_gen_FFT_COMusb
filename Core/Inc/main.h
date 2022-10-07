@@ -31,6 +31,8 @@ extern "C" {
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "stdbool.h"
+
  // #include "arm_const_structs.h"
 /* USER CODE END Includes */
 
@@ -40,6 +42,12 @@ extern "C" {
 typedef struct
 	{
 		uint16_t cmd_flags;
+		bool flag_ON_generation;        //	Reg_CMD_Buf[0].0 - флаг-команда Включить Генерацию
+		bool flag_ON_scan_freq;         //	Reg_CMD_Buf[0].1 - флаг-команда Вкл. Скольжение по диапазону, в соответствии с задаными регистрами
+        bool flag_ON_TxData_cicle;      //	Reg_CMD_Buf[0].2 - флаг-команда Вкл. долбежку передачи данных по кругу, прием при этом прекратиться, стоповать можно будет только синей кнопкой
+        bool flag_ON_autoTuning_freq;   //	Reg_CMD_Buf[0].3 - флаг-команда при включеной генерации автоподстройка частоты будет работать, если включен флаг скольжения, этот флаг игнорится
+        bool flag_ON_scan_time;         //	Reg_CMD_Buf[0].4 - флаг-команда на вкл генерации на одной частоте, и циклическую передачу сигналов КЛЮЧ�?, ТОК и НАПРЯЖЕН�?Е в реале, как есть из замера
+
 		uint16_t freq_start;	//	Reg_CMD_Buf[2] - регистр стартовой частоты, 14500-40000
 		uint16_t proc_pwr;		//	Reg_CMD_Buf[1] - регистр мощности,  2-98% заполнения
 		uint16_t step;			//	Reg_CMD_Buf[3] - регистр step(1-25гц) перемещения частоты, при сканировании диапазона, при сканировании старт будет Reg_CMD_Buf[2], максимум = (Reg_CMD_Buf[2] + step*_N-количество_)
@@ -81,7 +89,8 @@ typedef struct
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
-
+uint16_t fun_data_time_podgotovka( uint8_t * buffer_data_time, uint16_t index_data_time_zamer );
+void fun_data_scan_freq_podgotovka( uint8_t * buffer_data_scan_freq,  float  freq );
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
