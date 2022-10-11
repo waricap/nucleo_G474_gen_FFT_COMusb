@@ -1412,7 +1412,7 @@ HAL_StatusTypeDef HAL_UART_Receive_IT(UART_HandleTypeDef *huart, uint8_t *pData,
   */
 HAL_StatusTypeDef HAL_UART_Transmit_DMA(UART_HandleTypeDef *huart, const uint8_t *pData, uint16_t Size)
 {
-  /* Check that a Tx process is not already ongoing */
+  /* Check that a Tx process is not already ongoing == Убедитесь, что процесс передачи данных еще не продолжается */
   if (huart->gState == HAL_UART_STATE_READY)
   {
     if ((pData == NULL) || (Size == 0U))

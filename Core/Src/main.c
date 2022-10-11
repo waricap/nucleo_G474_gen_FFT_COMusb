@@ -397,6 +397,7 @@ int main(void)
   MX_USART2_UART_Init();
   MX_CRC_Init();
   MX_TIM17_Init();
+  MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
   // TIM2 - стартует каждый замер на ADC1_2,  tim2 capture compare 2 event - делит на 2 ITR10, который идёт от HRTIM, этот же ITR10 делает период TIM1-ключи через 128 раз, те на период TIM1-ключи укладывается 64 замера ADC1_2
   // TIM6 - используем для модбуса, делает прерывания через 50uS, а там библиотека ModBUS  работает
@@ -542,9 +543,10 @@ int main(void)
 						send_buff_cicle[83] = ( UCHAR )( usCRC16_main & 0xFF );
 						send_buff_cicle[84] = ( UCHAR )( usCRC16_main >> 8 );
 						vMBPortSerialEnable( FALSE, TRUE );
-						HAL_UART_Transmit_DMA(adr_huart_MB, send_buff_cicle, 85);
+
+						HAL_UART_Transmit_DMA(&huart3, send_buff_cicle, 85);
 						//if ( HAL_OK == HAL_UART_Transmit_DMA(adr_huart_MB, send_buff_cicle, 85))
-						//	{ HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_10); }
+							{ HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_10); }
               	  }
 	  }
 	  else
