@@ -512,12 +512,11 @@ int main(void)
 	  uint16_t usCRC16_main;
   while (1)
   {
-	  if (cmd_set.flag_ON_TxData_cicle == true)// если надо, по флагу, вот тут будет включаться циклическая долбежка
-	  {
+	  	  	  	  // если надо, по флагу  cmd_set.flag_ON_TxData_cicle , вот тут будет включаться циклическая долбежка
                   // TIM7 - используется для барабанной передачи данных по модбусу, выдает тики 100uS, прерывания нет, в цикле смотрим CNT
 		  	  	  // 25 mS  минимальный интервал между передачами, при котором минимум ошибок CRC
               	  //if (htim7.Instance->CNT >250) // tim7 тактуется 10 MHz, по условию if (htim7.Instance->CNT >100)   будет включаться передача ModBUS_TX
-              	  if ((htim7.Instance->CNT >250) & (flag_data_complit_for_Tx ==0))
+              	  if ((htim7.Instance->CNT >250) & (flag_data_complit_for_Tx ==0) & (cmd_set.flag_ON_TxData_cicle == true))
               	  {
               		  htim7.Instance->CNT =0;
               		  	send_buff_cicle[0] = MB_ADDRESS;
@@ -542,15 +541,13 @@ int main(void)
 						usCRC16_main = HAL_CRC_Calculate(&hcrc, ( uint32_t *)(&send_buff_cicle), 83);//смотрим сколько натикало -цикл HAL_CRC_Calculate(85char) длится 11.30мкс (1921 тика)
 						send_buff_cicle[83] = ( UCHAR )( usCRC16_main & 0xFF );
 						send_buff_cicle[84] = ( UCHAR )( usCRC16_main >> 8 );
-						vMBPortSerialEnable( FALSE, TRUE );
 
 						HAL_UART_Transmit_DMA(&huart3, send_buff_cicle, 85);
 						//if ( HAL_OK == HAL_UART_Transmit_DMA(adr_huart_MB, send_buff_cicle, 85))
 							{ HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_10); }
               	  }
-	  }
-	  else
-	  {  eMBPoll(  ); } // Вызовите основной цикл опроса стека протоколов Modbus.
+
+	  eMBPoll(  );  // Вызовите основной цикл опроса стека протоколов Modbus.
 
 
 
@@ -795,17 +792,18 @@ int main(void)
 		  //ввремя вычисления Две магнитуды, в реале == 97мкс(fftSize==256) == 37мкс(fftSize==96)
 		  arm_cmplx_mag_f32(data_adc1, arr1_Output_f32, fftSize);
 		  arm_cmplx_mag_f32(data_adc2, arr2_Output_f32, fftSize);
-		  arr1_phase_Output_8_f32 = atan2f(data_adc1[17], data_adc1[16]);
-		  	  while(arr1_phase_Output_8_f32 > M_PI ) {arr1_phase_Output_8_f32 = arr1_phase_Output_8_f32 - M_PI; }
-		      while(arr1_phase_Output_8_f32 < -M_PI) {arr1_phase_Output_8_f32 = arr1_phase_Output_8_f32 + M_PI; }
+		  arr1_phase_Output_8_f32 = 2*M_PI + atan2f(data_adc1[17], data_adc1[16]);
+		  	  while(arr1_phase_Output_8_f32 > 4*M_PI ) {arr1_phase_Output_8_f32 = arr1_phase_Output_8_f32 - 2*M_PI; }
+		      while(arr1_phase_Output_8_f32 < 0) {arr1_phase_Output_8_f32 = arr1_phase_Output_8_f32 + 2*M_PI; }
 		  arr2_phase_Output_8_f32 = atan2f(data_adc2[17], data_adc2[16]);
-			  while(arr2_phase_Output_8_f32 > 0 ) {arr2_phase_Output_8_f32 = arr2_phase_Output_8_f32 - 2*M_PI; }
-			  while(arr2_phase_Output_8_f32 < -2*M_PI ) {arr2_phase_Output_8_f32 = arr2_phase_Output_8_f32 + 2*M_PI; }
+			  while(arr2_phase_Output_8_f32 > 2*M_PI ) {arr2_phase_Output_8_f32 = arr2_phase_Output_8_f32 - 2*M_PI; }
+			  while(arr2_phase_Output_8_f32 < 0 ) {arr2_phase_Output_8_f32 = arr2_phase_Output_8_f32 + 2*M_PI; }
 
 			  shift_phase_I8_U8_f32 = arr1_phase_Output_8_f32 - arr2_phase_Output_8_f32;
-//			  	  while(shift_phase_I8_U8_f32 > M_PI/2 ) {shift_phase_I8_U8_f32 = shift_phase_I8_U8_f32 - M_PI/2; }
-//			  	  while(shift_phase_I8_U8_f32 < -M_PI/2 ) {shift_phase_I8_U8_f32 = shift_phase_I8_U8_f32 + M_PI/2; }
-		  cos_phase_8_f32 = arm_cos_f32(shift_phase_I8_U8_f32);
+			  float float_temp = shift_phase_I8_U8_f32;
+			  	  while(float_temp > M_PI/2 ) {float_temp = float_temp - M_PI/2; }
+			  	  while(float_temp < -M_PI/2 ) {float_temp = float_temp + M_PI/2; }
+		  cos_phase_8_f32 = arm_cos_f32(float_temp);
 		  atan_phase_8_f32 = atanf(tanf(shift_phase_I8_U8_f32));
 		  calc_power_Output_8_f32	= arr2_Output_f32[8] * arr1_Output_f32[8] * cos_phase_8_f32; // arr2_ == U    arr1_ == I
 		  calc_R_Output_8_f32 		= arr2_Output_f32[8] / arr1_Output_f32[8] * cos_phase_8_f32; // arr2_ == U    arr1_ == I
@@ -1270,9 +1268,6 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 
 uint16_t fun_data_time_podgotovka( uint8_t * buffer_data_time, uint16_t index_data_time_zamer )
 {
-	if (cmd_set.flag_ON_scan_time ==false)
-		{ return 0;  }
-
 	// эта фун осталась как заглушка, значения в буфер  buffer_data_time  закладываются в конце обработки замера
     // заморачиваться с сообщением об ошибке не будем, тупо отправить в ответ последние элементы пакета массивов, и все
 
